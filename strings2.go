@@ -74,7 +74,6 @@ func ReplaceString(s, old, new string, n int) string {
 			copy(sb[writePos:], sb[pos:pos+segmentLen])
 			writePos += segmentLen
 
-			// Копируем new
 			copy(sb[writePos:], newb)
 			writePos += newLen
 

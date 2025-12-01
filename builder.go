@@ -17,6 +17,7 @@ func NewBuilder(cap int) *Builder {
 	}
 }
 
+// ResetAndKeepCap sets all data to zero and keep cap
 func (b *Builder) ResetAndKeepCap() {
 	b.buf = b.buf[:cap(b.buf)]
 	memclr(b.buf)
