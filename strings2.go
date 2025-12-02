@@ -2,11 +2,17 @@ package strings2
 
 import (
 	"bytes"
+	"fmt"
 	"math"
 	"math/bits"
+	"reflect"
+	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/NikoMalik/strconv2"
 )
 
 // According to static analysis, spaces, dashes, zeros, equals, and tabs
@@ -337,4 +343,220 @@ func Repeat(s string, count int) string {
 		b.WriteString(b.String()[:chunk])
 	}
 	return b.String()
+}
+
+func EqualFold(b, s string) bool {
+	if len(b) != len(s) {
+		return false
+	}
+
+	table := upperTable
+	n := len(b)
+	i := 0
+
+	// Unroll by 4
+	limit := n &^ 3
+	for i < limit {
+		b0 := b[i+0]
+		s0 := s[i+0]
+		if b0|s0 >= utf8.RuneSelf {
+			goto hasUnicode
+		}
+		if table[b0] != table[s0] {
+			return false
+		}
+
+		b1 := b[i+1]
+		s1 := s[i+1]
+		if b1|s1 >= utf8.RuneSelf {
+			goto hasUnicode
+		}
+		if table[b1] != table[s1] {
+			return false
+		}
+
+		b2 := b[i+2]
+		s2 := s[i+2]
+		if b2|s2 >= utf8.RuneSelf {
+			goto hasUnicode
+		}
+		if table[b2] != table[s2] {
+			return false
+		}
+
+		b3 := b[i+3]
+		s3 := s[i+3]
+		if b3|s3 >= utf8.RuneSelf {
+			goto hasUnicode
+		}
+		if table[b3] != table[s3] {
+			return false
+		}
+
+		i += 4
+	}
+
+	for i < n {
+		bi := b[i]
+		si := s[i]
+		if bi|si >= utf8.RuneSelf {
+			goto hasUnicode
+		}
+		if table[b[i]] != table[s[i]] {
+			return false
+		}
+		i++
+	}
+	return true
+
+hasUnicode:
+	// Fall back to Unicode-aware path.
+	// Trim processed part.
+	b = b[i:]
+	s = s[i:]
+
+	for len(b) > 0 {
+		if len(s) == 0 {
+			return false
+		}
+
+		var br, sr rune
+		var bs, ss int
+
+		// decode b rune
+		if b[0] < utf8.RuneSelf {
+			br = rune(b[0])
+			bs = 1
+		} else {
+			br, bs = utf8.DecodeRune(unsafeBytes(b))
+		}
+
+		// decode s rune
+		if s[0] < utf8.RuneSelf {
+			sr = rune(s[0])
+			ss = 1
+		} else {
+			sr, ss = utf8.DecodeRune(unsafeBytes(s))
+		}
+
+		b = b[bs:]
+		s = s[ss:]
+
+		// Fast match
+		if br == sr {
+			continue
+		}
+
+		// Make br < sr
+		if sr < br {
+			sr, br = br, sr
+		}
+
+		// ASCII fast case
+		if sr < utf8.RuneSelf {
+			if 'A' <= br && br <= 'Z' && sr == br+'a'-'A' {
+				continue
+			}
+			return false
+		}
+
+		// unicode.SimpleFold
+		r := unicode.SimpleFold(br)
+		for r != br && r < sr {
+			r = unicode.SimpleFold(r)
+		}
+		if r == sr {
+			continue
+		}
+
+		return false
+	}
+
+	return len(s) == 0
+}
+
+// ToString Change arg to string
+func ToString(arg any, timeFormat ...string) string {
+	switch v := arg.(type) {
+	case int:
+		var buf [strconv2.SAFETY_BUF_SIZE]byte
+		n := strconv2.FormatInt6410(buf[:], int64(v))
+		return unsafeString(buf[:n])
+	case int8:
+		var buf [strconv2.SAFETY_BUF_SIZE]byte
+		n := strconv2.FormatInt6410(buf[:], int64(v))
+		return unsafeString(buf[:n])
+
+	case int16:
+		var buf [strconv2.SAFETY_BUF_SIZE]byte
+		n := strconv2.FormatInt6410(buf[:], int64(v))
+		return unsafeString(buf[:n])
+	case int32:
+		var buf [strconv2.SAFETY_BUF_SIZE]byte
+		n := strconv2.FormatInt6410(buf[:], int64(v))
+		return unsafeString(buf[:n])
+	case int64:
+		var buf [strconv2.SAFETY_BUF_SIZE]byte
+		n := strconv2.FormatInt6410(buf[:], int64(v))
+		return unsafeString(buf[:n])
+	case uint:
+		var buf [strconv2.SAFETY_BUF_SIZE]byte
+		n := strconv2.FormatUint6410(buf[:], uint64(v))
+		return unsafeString(buf[:n])
+	case uint8:
+		var buf [strconv2.SAFETY_BUF_SIZE]byte
+		n := strconv2.FormatUint6410(buf[:], uint64(v))
+		return unsafeString(buf[:n])
+	case uint16:
+		var buf [strconv2.SAFETY_BUF_SIZE]byte
+		n := strconv2.FormatUint16(buf[:], v)
+		return unsafeString(buf[:n])
+	case uint32:
+		var buf [strconv2.SAFETY_BUF_SIZE]byte
+		n := strconv2.FormatUint6410(buf[:], uint64(v))
+		return unsafeString(buf[:n])
+
+	case uint64:
+		var buf [strconv2.SAFETY_BUF_SIZE]byte
+		n := strconv2.FormatUint6410(buf[:], uint64(v))
+		return unsafeString(buf[:n])
+	case string:
+		return v
+	case []byte:
+		return unsafeString(v)
+	case bool:
+		return strconv.FormatBool(v)
+	case float32:
+		return strconv.FormatFloat(float64(v), 'f', -1, 32)
+	case float64:
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	case time.Time:
+		if len(timeFormat) > 0 {
+			return v.Format(timeFormat[0])
+		}
+		return v.Format("2006-01-02 15:04:05")
+	case reflect.Value:
+		return ToString(v.Interface(), timeFormat...)
+	case fmt.Stringer:
+		return v.String()
+	default:
+		rv := reflect.ValueOf(arg)
+		if rv.Kind() == reflect.Pointer && !rv.IsNil() {
+			return ToString(rv.Elem().Interface(), timeFormat...)
+		} else if rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array {
+			// handle slices
+			var buf = NewBuilder(rv.Len())
+			buf.WriteString("[") //nolint:errcheck // no need to check error
+			for i := 0; i < rv.Len(); i++ {
+				if i > 0 {
+					buf.WriteString(" ") //nolint:errcheck // no need to check error
+				}
+				buf.WriteString(ToString(rv.Index(i).Interface())) //nolint:errcheck // no need to check error
+			}
+			buf.WriteString("]") //nolint:errcheck // no need to check error
+			return buf.String()
+		}
+
+		return fmt.Sprint(arg)
+	}
 }

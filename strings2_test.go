@@ -1,10 +1,99 @@
 package strings2
 
 import (
+	"fmt"
 	"math"
+	"reflect"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/NikoMalik/strconv2"
 )
+
+var (
+	upperStr = strings.Repeat("HELLO-WORLD-123", 50)
+	lowerStr = strings.Repeat("hello-world-123", 50)
+
+	// Unicode Latin: Å vs å
+	unicode1A = "HÅLL"
+	unicode1B = "håll"
+
+	// Unicode Greek: Σ vs σ vs ς (sigma has 3 folds)
+	unicode2A = "ΣΕΙΣ"
+	unicode2B = "σεις"
+
+	// Unicode Cyrillic: е vs Е
+	unicode3A = "Привет"
+	unicode3B = "ПРИВЕТ"
+
+	benchSink bool
+)
+
+func Benchmark_EqualFoldBytes(b *testing.B) {
+	left := upperStr
+	right := lowerStr
+
+	b.Run("strings2", func(b *testing.B) {
+		b.ResetTimer()
+		b.ReportAllocs()
+		for b.Loop() {
+			benchSink = EqualFold(left, right)
+		}
+	})
+
+	b.Run("std_equalfold", func(b *testing.B) {
+		b.ResetTimer()
+		b.ReportAllocs()
+		for b.Loop() {
+			benchSink = strings.EqualFold(upperStr, lowerStr)
+		}
+	})
+
+	b.Run("Unicode1_German_my", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			benchSink = EqualFold(unicode1A, unicode1B)
+			if !benchSink {
+				b.Fatal("have to be true")
+			}
+		}
+
+	})
+
+	b.Run("Unicode1_German_std", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			benchSink = strings.EqualFold(unicode1A, unicode1B)
+			if !benchSink {
+				b.Fatal("have to be true")
+			}
+		}
+
+	})
+
+	b.Run("Unicode2_Greek_my", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			benchSink = EqualFold(unicode2A, unicode2B)
+			if !benchSink {
+				b.Fatal("have to be true")
+			}
+		}
+	})
+
+	b.Run("Unicode2_Greek_std", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			benchSink = strings.EqualFold(unicode2A, unicode2B)
+			if !benchSink {
+				b.Fatal("have to be true")
+			}
+		}
+
+	})
+}
 
 func BenchmarkReplaceString(b *testing.B) {
 	input := strings.Repeat("abc needle xyz ", 20000)
@@ -319,4 +408,235 @@ func TestBuilderResetAndKeepCap(t *testing.T) {
 			}
 		}
 	})
+}
+
+func Test_EqualFold(t *testing.T) {
+	t.Parallel()
+	testCases := []struct {
+		Expected bool
+		S1       string
+		S2       string
+	}{
+		{Expected: true, S1: "/MY/NAME/IS/:PARAM/*", S2: "/my/name/is/:param/*"},
+		{Expected: true, S1: "/MY/NAME/IS/:PARAM/*", S2: "/my/name/is/:param/*"},
+		{Expected: true, S1: "/MY1/NAME/IS/:PARAM/*", S2: "/MY1/NAME/IS/:PARAM/*"},
+		{Expected: false, S1: "/my2/name/is/:param/*", S2: "/my2/name"},
+		{Expected: false, S1: "/dddddd", S2: "eeeeee"},
+		{Expected: false, S1: "\na", S2: "*A"},
+		{Expected: true, S1: "/MY3/NAME/IS/:PARAM/*", S2: "/my3/name/is/:param/*"},
+		{Expected: true, S1: "/MY4/NAME/IS/:PARAM/*", S2: "/my4/nAME/IS/:param/*"},
+	}
+
+	for _, tc := range testCases {
+		got := EqualFold(tc.S1, tc.S2)
+		want := strings.EqualFold(tc.S1, tc.S2)
+		if want != got {
+			t.Fatalf("Equal Fold: mismatch: %s:%s", tc.S1, tc.S2)
+
+		}
+
+	}
+}
+
+type myStringer struct{}
+
+func (myStringer) String() string { return "STRINGER_OK" }
+
+func TestToString(t *testing.T) {
+	// ---- integers ----
+	t.Run("ints", func(t *testing.T) {
+		cases := map[string]any{
+			"int":    int(42),
+			"int8":   int8(-5),
+			"int16":  int16(1234),
+			"int32":  int32(-999),
+			"int64":  int64(1<<40 + 123),
+			"uint":   uint(77),
+			"uint8":  uint8(255),
+			"uint16": uint16(65000),
+			"uint32": uint32(1<<31 + 2),
+			"uint64": uint64(1<<50 + 7),
+		}
+		for name, v := range cases {
+			got := ToString(v)
+			want := fmt.Sprintf("%v", v)
+			if got != want {
+				t.Fatalf("%s: want=%q got=%q", name, want, got)
+			}
+		}
+	})
+
+	// ---- strings, bytes ----
+	t.Run("string and bytes", func(t *testing.T) {
+		if ToString("abc") != "abc" {
+			t.Fatal("string failed")
+		}
+		if ToString([]byte("xyz")) != "xyz" {
+			t.Fatal("bytes failed")
+		}
+	})
+
+	// ---- bool ----
+	t.Run("bool", func(t *testing.T) {
+		if ToString(true) != "true" || ToString(false) != "false" {
+			t.Fatal("bool failed")
+		}
+	})
+
+	// ---- float ----
+	t.Run("floats", func(t *testing.T) {
+		if ToString(float32(3.14)) != "3.14" {
+			t.Fatal("float32 failed")
+		}
+		if ToString(float64(2.5)) != "2.5" {
+			t.Fatal("float64 failed")
+		}
+	})
+
+	// ---- time ----
+	t.Run("time default", func(t *testing.T) {
+		tm := time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
+		got := ToString(tm)
+		want := "2020-01-02 03:04:05"
+		if got != want {
+			t.Fatalf("time default: want=%q got=%q", want, got)
+		}
+	})
+
+	t.Run("time formatted", func(t *testing.T) {
+		tm := time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
+		got := ToString(tm, time.RFC3339)
+		want := tm.Format(time.RFC3339)
+		if got != want {
+			t.Fatalf("time formatted: want=%q got=%q", want, got)
+		}
+	})
+
+	// ---- Stringer ----
+	t.Run("stringer", func(t *testing.T) {
+		if ToString(myStringer{}) != "STRINGER_OK" {
+			t.Fatal("stringer failed")
+		}
+	})
+
+	// ---- reflect.Value ----
+	t.Run("reflect value", func(t *testing.T) {
+		v := reflect.ValueOf(123)
+		if ToString(v) != "123" {
+			t.Fatal("reflect.Value failed")
+		}
+	})
+
+	// ---- pointer deref ----
+	t.Run("pointer", func(t *testing.T) {
+		x := 777
+		if ToString(&x) != "777" {
+			t.Fatal("pointer failed")
+		}
+	})
+
+	// ---- slice / array ----
+	t.Run("slice", func(t *testing.T) {
+		got := ToString([]int{1, 2, 3})
+		want := "[1 2 3]"
+		if got != want {
+			t.Fatalf("slice: want=%q got=%q", want, got)
+		}
+
+		got = ToString([3]string{"a", "b", "c"})
+		want = "[a b c]"
+		if got != want {
+			t.Fatalf("array: want=%q got=%q", want, got)
+		}
+	})
+
+	// ---- fallback ----
+	t.Run("fallback", func(t *testing.T) {
+		type X struct{ A int }
+		x := X{A: 7}
+		got := ToString(x)
+		want := fmt.Sprint(x)
+		if got != want {
+			t.Fatalf("fallback: want=%q got=%q", want, got)
+		}
+	})
+}
+
+func TestToStringStackEscape(t *testing.T) {
+	var s string
+
+	func() {
+		s = ToString(123456789)
+	}()
+
+	var big [4096]byte
+	for i := range big {
+		big[i] = byte(i)
+	}
+
+	if s != "123456789" {
+		t.Fatalf("stack escape broken: got=%q", s)
+	}
+}
+
+func TestToStringByteAlias(t *testing.T) {
+	b := []byte("hello")
+	s := ToString(b)
+
+	b[1] = 'a'
+
+	if s != "hallo" {
+		t.Fatalf("string alias broken: got=%q", s)
+	}
+}
+
+func TestToStringSliceSafe(t *testing.T) {
+	sl := []int{1, 2, 3}
+
+	s := ToString(sl)
+	sl[1] = 999
+
+	if s != "[1 2 3]" {
+		t.Fatalf("slice safe failed: got=%q", s)
+	}
+}
+
+func BenchmarkToStringInt(b *testing.B) {
+	x := 123456
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = ToString(x)
+	}
+}
+
+func BenchmarkStrconv2Int(b *testing.B) {
+	x := 123456
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		var buf [strconv2.SAFETY_BUF_SIZE]byte
+		n := strconv2.FormatInt6410(buf[:], int64(x))
+		_ = unsafeString(buf[:n])
+	}
+}
+
+func BenchmarkItoaInt(b *testing.B) {
+	x := 123456
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for b.Loop() {
+		_ = strconv.Itoa(x)
+	}
+}
+
+func BenchmarkSprintfInt(b *testing.B) {
+	x := 123456
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for b.Loop() {
+		_ = fmt.Sprintf("%d", x)
+	}
 }
