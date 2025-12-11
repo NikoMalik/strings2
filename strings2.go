@@ -152,7 +152,6 @@ func replaceEmptyOld(s, new string, n int) string {
 		currPos += len(new)
 		n--
 	}
-
 	start := 0
 	for i := 0; i < m && n > 0; i++ {
 		_, wid := utf8.DecodeRuneInString(s[start:])
@@ -286,6 +285,7 @@ func Repeat(s string, count int) string {
 
 	// Since we cannot return an error on overflow,
 	// we should panic if the repeat will generate an overflow.
+	// 
 	// See golang.org/issue/16237.
 	if count < 0 {
 		panic("strings: negative Repeat count")
@@ -560,3 +560,10 @@ func ToString(arg any, timeFormat ...string) string {
 		return fmt.Sprint(arg)
 	}
 }
+
+
+
+
+
+
+
