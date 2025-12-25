@@ -36,6 +36,10 @@ const (
 		"\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t"
 )
 
+func ReplaceAll(s, old, new string) string {
+	return ReplaceString(s, old, new, -1)
+}
+
 func ReplaceString(s, old, new string, n int) string {
 	if n == 0 || old == new || len(s) == 0 {
 		return s
@@ -285,7 +289,7 @@ func Repeat(s string, count int) string {
 
 	// Since we cannot return an error on overflow,
 	// we should panic if the repeat will generate an overflow.
-	// 
+	//
 	// See golang.org/issue/16237.
 	if count < 0 {
 		panic("strings: negative Repeat count")
@@ -560,10 +564,3 @@ func ToString(arg any, timeFormat ...string) string {
 		return fmt.Sprint(arg)
 	}
 }
-
-
-
-
-
-
-
