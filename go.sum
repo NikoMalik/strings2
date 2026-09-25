@@ -1,2 +1,4 @@
 github.com/NikoMalik/strconv2 v0.0.0-20251119202519-e9cac212aea0 h1:3BtVjRtoDdAUjTNsh2dqnN9951/o3bdPvyQ+ogb9sZA=
 github.com/NikoMalik/strconv2 v0.0.0-20251119202519-e9cac212aea0/go.mod h1:M18QTMFFNZJGcckfJNCfz4UGx+F3PUUX6z5OXyjkjdM=
+golang.org/x/sys v0.47.0 h1:o7XGOvZQCADBQQ4Y7VNq2dRWQR7JmOUW8Kxx4ZsNgWs=
+golang.org/x/sys v0.47.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=

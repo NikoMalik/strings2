@@ -640,3 +640,21 @@ func BenchmarkSprintfInt(b *testing.B) {
 		_ = fmt.Sprintf("%d", x)
 	}
 }
+
+func BenchmarkValidAscii(b *testing.B) {
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for b.Loop() {
+		_ = ValidString("hjfkajfkakfjakfjakf")
+	}
+}
+
+func BenchmarkValidAsciiDefault(b *testing.B) {
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for b.Loop() {
+		_ = isASCII("hjfkajfkakfjakfjakf")
+	}
+}
