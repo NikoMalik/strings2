@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 	"unicode/utf8"
+	"unsafe"
 
 	"github.com/NikoMalik/strconv2"
 )
@@ -229,50 +229,155 @@ var upperTable = func() [256]byte {
 	return table
 }()
 
+const (
+	swarOnes     = 0x0101010101010101
+	swarHighBits = 0x8080808080808080
+	swarLowSeven = 0x7f7f7f7f7f7f7f7f
+)
+
+func matchRangeMask(w uint64, lo, hi byte) uint64 {
+	b := w & swarLowSeven
+	ge := b + (0x80-uint64(lo))*swarOnes
+	gt := b + (0x80-uint64(hi)-1)*swarOnes
+	return ge &^ gt &^ w & swarHighBits
+}
+
+func toLowerWord(w uint64) uint64 {
+	return w | matchRangeMask(w, 'A', 'Z')>>2
+}
+
+func toUpperWord(w uint64) uint64 {
+	return w &^ (matchRangeMask(w, 'a', 'z') >> 2)
+}
+
 func ToLower(s string) string {
-	isASCII, hasUpper := true, false
-	for i := 0; i < len(s); i++ {
+	n := len(s)
+	if n == 0 {
+		return s
+	}
+	p := unsafe.Pointer(unsafe.StringData(s))
+	i := 0
+	var upper uint64
+	for ; i+8 <= n; i += 8 {
+		w := *(*uint64)(unsafe.Pointer(uintptr(p) + uintptr(i)))
+		if w&swarHighBits != 0 {
+			return toLowerUnicode(s)
+		}
+		upper |= matchRangeMask(w, 'A', 'Z')
+	}
+	for ; i < n; i++ {
 		c := s[i]
 		if c >= utf8.RuneSelf {
-			isASCII = false
-			break
+			return toLowerUnicode(s)
 		}
-		hasUpper = hasUpper || ('A' <= c && c <= 'Z')
+		if 'A' <= c && c <= 'Z' {
+			upper |= 1
+		}
 	}
-	if isASCII {
-		if !hasUpper {
-			return s
-		}
-		var b = NewBuilder(len(s))
-		for i := 0; i < len(s); i++ {
-			b.WriteByte(lowerTable[s[i]])
-		}
-		return b.String()
+	if upper == 0 {
+		return s
 	}
-	return strings.Map(unicode.ToLower, s)
+	dst := MakeNoZero(n)
+	dp := unsafe.Pointer(&dst[0])
+	i = 0
+	for ; i+8 <= n; i += 8 {
+		w := *(*uint64)(unsafe.Pointer(uintptr(p) + uintptr(i)))
+		*(*uint64)(unsafe.Pointer(uintptr(dp) + uintptr(i))) = toLowerWord(w)
+	}
+	for ; i < n; i++ {
+		dst[i] = lowerTable[s[i]]
+	}
+	return unsafeString(dst)
 }
 
 func ToUpper(s string) string {
-	isASCII, hasLower := true, false
-	for i := 0; i < len(s); i++ {
+	n := len(s)
+	if n == 0 {
+		return s
+	}
+	p := unsafe.Pointer(unsafe.StringData(s))
+	i := 0
+	var lower uint64
+	for ; i+8 <= n; i += 8 {
+		w := *(*uint64)(unsafe.Pointer(uintptr(p) + uintptr(i)))
+		if w&swarHighBits != 0 {
+			return toUpperUnicode(s)
+		}
+		lower |= matchRangeMask(w, 'a', 'z')
+	}
+	for ; i < n; i++ {
 		c := s[i]
 		if c >= utf8.RuneSelf {
-			isASCII = false
+			return toUpperUnicode(s)
+		}
+		if 'a' <= c && c <= 'z' {
+			lower |= 1
+		}
+	}
+	if lower == 0 {
+		return s
+	}
+	dst := MakeNoZero(n)
+	dp := unsafe.Pointer(&dst[0])
+	i = 0
+	for ; i+8 <= n; i += 8 {
+		w := *(*uint64)(unsafe.Pointer(uintptr(p) + uintptr(i)))
+		*(*uint64)(unsafe.Pointer(uintptr(dp) + uintptr(i))) = toUpperWord(w)
+	}
+	for ; i < n; i++ {
+		dst[i] = upperTable[s[i]]
+	}
+	return unsafeString(dst)
+}
+
+var asciiSpaceTable = [256]uint8{'\t': 1, '\n': 1, '\v': 1, '\f': 1, '\r': 1, ' ': 1}
+
+func trimLeftFunc(s string, f func(rune) bool) string {
+	i := 0
+	for i < len(s) {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if !f(r) {
 			break
 		}
-		hasLower = hasLower || ('a' <= c && c <= 'z')
+		i += size
 	}
-	if isASCII {
-		if !hasLower {
-			return s
+	return s[i:]
+}
+
+func trimRightFunc(s string, f func(rune) bool) string {
+	i := len(s)
+	for i > 0 {
+		r, size := utf8.DecodeLastRuneInString(s[:i])
+		if !f(r) {
+			break
 		}
-		var b = NewBuilder(len(s))
-		for i := 0; i < len(s); i++ {
-			b.WriteByte(upperTable[s[i]])
-		}
-		return b.String()
+		i -= size
 	}
-	return strings.Map(unicode.ToUpper, s)
+	return s[:i]
+}
+
+func TrimSpace(s string) string {
+	start := 0
+	for ; start < len(s); start++ {
+		c := s[start]
+		if c >= utf8.RuneSelf {
+			return trimRightFunc(trimLeftFunc(s[start:], isSpaceRune), isSpaceRune)
+		}
+		if asciiSpaceTable[c] == 0 {
+			break
+		}
+	}
+	stop := len(s)
+	for ; stop > start; stop-- {
+		c := s[stop-1]
+		if c >= utf8.RuneSelf {
+			return trimRightFunc(s[start:stop], isSpaceRune)
+		}
+		if asciiSpaceTable[c] == 0 {
+			break
+		}
+	}
+	return s[start:stop]
 }
 
 // Repeat returns a new string consisting of count copies of the string s.
@@ -350,113 +455,71 @@ func Repeat(s string, count int) string {
 }
 
 func EqualFold(b, s string) bool {
-	if len(b) != len(s) {
-		return false
+	minLen := len(b)
+	if len(s) < minLen {
+		minLen = len(s)
+	}
+
+	pb := unsafe.Pointer(unsafe.StringData(b))
+	ps := unsafe.Pointer(unsafe.StringData(s))
+	i := 0
+	for ; i+8 <= minLen; i += 8 {
+		x := *(*uint64)(unsafe.Pointer(uintptr(pb) + uintptr(i)))
+		y := *(*uint64)(unsafe.Pointer(uintptr(ps) + uintptr(i)))
+		if (x|y)&swarHighBits != 0 {
+			break
+		}
+		if x != y && toUpperWord(x) != toUpperWord(y) {
+			return false
+		}
 	}
 
 	table := upperTable
-	n := len(b)
-	i := 0
-
-	// Unroll by 4
-	limit := n &^ 3
-	for i < limit {
-		b0 := b[i+0]
-		s0 := s[i+0]
-		if b0|s0 >= utf8.RuneSelf {
-			goto hasUnicode
-		}
-		if table[b0] != table[s0] {
-			return false
-		}
-
-		b1 := b[i+1]
-		s1 := s[i+1]
-		if b1|s1 >= utf8.RuneSelf {
-			goto hasUnicode
-		}
-		if table[b1] != table[s1] {
-			return false
-		}
-
-		b2 := b[i+2]
-		s2 := s[i+2]
-		if b2|s2 >= utf8.RuneSelf {
-			goto hasUnicode
-		}
-		if table[b2] != table[s2] {
-			return false
-		}
-
-		b3 := b[i+3]
-		s3 := s[i+3]
-		if b3|s3 >= utf8.RuneSelf {
-			goto hasUnicode
-		}
-		if table[b3] != table[s3] {
-			return false
-		}
-
-		i += 4
-	}
-
-	for i < n {
+	for i < len(b) && i < len(s) {
 		bi := b[i]
 		si := s[i]
 		if bi|si >= utf8.RuneSelf {
-			goto hasUnicode
+			break
 		}
-		if table[b[i]] != table[s[i]] {
+		if table[bi] != table[si] {
 			return false
 		}
 		i++
 	}
-	return true
 
-hasUnicode:
-	// Fall back to Unicode-aware path.
-	// Trim processed part.
-	b = b[i:]
-	s = s[i:]
-
-	for len(b) > 0 {
-		if len(s) == 0 {
+	tb := b[i:]
+	ts := s[i:]
+	for len(tb) > 0 {
+		if len(ts) == 0 {
 			return false
 		}
 
 		var br, sr rune
-		var bs, ss int
+		var bn, sn int
 
-		// decode b rune
-		if b[0] < utf8.RuneSelf {
-			br = rune(b[0])
-			bs = 1
+		if tb[0] < utf8.RuneSelf {
+			br, bn = rune(tb[0]), 1
 		} else {
-			br, bs = utf8.DecodeRune(unsafeBytes(b))
+			br, bn = utf8.DecodeRuneInString(tb)
 		}
 
-		// decode s rune
-		if s[0] < utf8.RuneSelf {
-			sr = rune(s[0])
-			ss = 1
+		if ts[0] < utf8.RuneSelf {
+			sr, sn = rune(ts[0]), 1
 		} else {
-			sr, ss = utf8.DecodeRune(unsafeBytes(s))
+			sr, sn = utf8.DecodeRuneInString(ts)
 		}
 
-		b = b[bs:]
-		s = s[ss:]
+		tb = tb[bn:]
+		ts = ts[sn:]
 
-		// Fast match
 		if br == sr {
 			continue
 		}
 
-		// Make br < sr
 		if sr < br {
 			sr, br = br, sr
 		}
 
-		// ASCII fast case
 		if sr < utf8.RuneSelf {
 			if 'A' <= br && br <= 'Z' && sr == br+'a'-'A' {
 				continue
@@ -464,19 +527,14 @@ hasUnicode:
 			return false
 		}
 
-		// unicode.SimpleFold
-		r := unicode.SimpleFold(br)
-		for r != br && r < sr {
-			r = unicode.SimpleFold(r)
-		}
-		if r == sr {
+		if foldRune(br) == foldRune(sr) {
 			continue
 		}
 
 		return false
 	}
 
-	return len(s) == 0
+	return len(ts) == 0
 }
 
 // ToString Change arg to string
